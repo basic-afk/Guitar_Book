@@ -71,6 +71,12 @@ details.add summary{cursor:pointer;min-height:44px;display:flex;align-items:cent
 .strings button[aria-pressed=true] small{color:inherit}
 .strings button.good{box-shadow:inset 0 -5px 0 var(--ok)}
 .c-ok{color:var(--ok)}.c-low{color:var(--low)}.c-high{color:var(--high)}
+.live{display:flex;align-items:center;gap:10px;margin-top:10px;font-weight:600;font-size:15px}
+.live .dot{width:12px;height:12px;border-radius:50%;background:var(--ok);flex:none;animation:pulse 1.4s ease-in-out infinite}
+.live .meter{flex:1;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden}.live .meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .08s}
+@keyframes pulse{50%{opacity:.3}}
+.tuner.idle .needle,.tuner.idle + .readout,.idle .readout{opacity:.45}
+@media(prefers-reduced-motion:reduce){.live .dot{animation:none}}
 .fallback{background:var(--panel);border-radius:16px;padding:16px;margin-top:12px}
 .fallback h3{margin:0 0 6px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:12px;font-weight:600;z-index:9;max-width:90vw}
@@ -106,7 +112,7 @@ details.add summary{cursor:pointer;min-height:44px;display:flex;align-items:cent
       <button data-t="std" aria-pressed="true">Standard<small>E A D G B E</small></button>
       <button data-t="flat" aria-pressed="false">Half step down<small>E♭ A♭ D♭ G♭ B♭ E♭</small></button>
     </div>
-    <div class="tuner"><svg viewBox="0 0 400 225" role="img" aria-label="Tuning needle" id="dial"></svg>
+    <div class="tuner" id="tuneWrap"><svg viewBox="0 0 400 225" role="img" aria-label="Tuning needle" id="dial"></svg>
       <div class="readout"><div class="nn" id="tn">–</div><div class="sub" id="tc">Pick a string, or just play one</div><div class="hint" id="th" aria-live="polite"></div></div></div>
     <div class="strings" id="strs"></div>
     <div id="lis"></div>
@@ -221,19 +227,19 @@ const DSP = (() => {
     return {
       read(buf, sr, fixed = -1) {
         const r = rms(buf); const onset = r > prevR * 1.6 && r > 0.01; prevR = r;
-        peak = Math.max(r, peak * 0.985);
-        if (r < Math.max(0.004, peak * 0.18)) { sm.push(0); return { f0: 0, r, why: 'fading' }; }
+        peak = Math.max(r, peak * 0.975);
+        if (r < Math.max(0.0018, peak * 0.05)) { sm.push(0); return { f0: 0, r, why: 'fading' }; }
         let idx = fixed;
         if (idx < 0) {
           const sc = noteScores(buf, sr, strings); const top = sc.indexOf(sc.top);
-          if (sc[top].s < 0.6) return { f0: 0, r };
+          if (sc[top].s < 0.5) return { f0: 0, r };
           if (lock < 0 || onset || top === lock) { lock = top; pend = -1; }
           else if (top === pend) { if (++pendN >= 4) { lock = top; pend = -1; } } else { pend = top; pendN = 1; }
           if (lock !== top && sc[lock].s < sc[top].s * 0.35) lock = top;
           idx = lock;
         }
         const y = pitchNear(buf, sr, m2f(strings[idx]), fixed < 0 ? 300 : 550);
-        if (y.clarity < 0.6) { sm.push(0); return { f0: 0, r, idx }; }
+        if (y.clarity < 0.5) { sm.push(0); return { f0: 0, r, idx }; }
         // in auto mode a reading at the edge of the window means we picked the wrong string: wait for a better frame
         if (fixed < 0 && Math.abs(f2m(y.f0) - strings[idx]) > 1.5) { lock = -1; sm.push(0); return { f0: 0, r, idx }; }
         return { f0: sm.push(y.f0), r, idx, clarity: y.clarity };
@@ -692,10 +698,27 @@ $('#ref').onclick = () => Audio.pluck(OPN()[sel >= 0 ? sel : last], 0, 0.7);
   <label class="btn alt">Choose a recording<input type="file" accept="audio/*,video/*" class="vh"></label>
   <p class="sub" data-why style="margin-top:10px">For live tuning, open this app from its GitHub page (basic-afk.github.io/Guitar_Book) in Safari or Chrome, and allow the microphone.</p>
   <button class="btn ghost" data-retry style="margin-top:10px">Try the mic again</button></div>`;
-  const b = $('[data-l]', host), fb = $('.fallback', host); let on = false;
-  const setOn = (v) => { on = v; b.textContent = v ? 'Stop listening' : 'Start listening'; b.classList.toggle('on', v); };
+  host.insertAdjacentHTML('beforeend', `<div class="live hidden" data-live><span class="dot"></span><span data-st>Listening… pluck one string</span><span class="meter"><i data-lv></i></span></div>`);
+  const b = $('[data-l]', host), fb = $('.fallback', host), live = $('[data-live]', host), st = $('[data-st]', host), lv = $('[data-lv]', host); let on = false, lastHit = 0, lastCheck = 0, fixing = false;
+  const setOn = (v) => { on = v; b.textContent = v ? 'Stop listening' : 'Start listening'; b.classList.toggle('on', v); live.classList.toggle('hidden', !v); };
+  /* the phone can pause the mic (call, Siri, screen lock, other apps): bring it back */
+  async function watchdog() {
+    if (fixing) return; const now = performance.now(); if (now - lastCheck < 1000) return; lastCheck = now;
+    const c = Audio.ac(), tr = Audio.mic.track;
+    if (c.state !== 'running') { c.resume().catch(() => {}); }
+    if (!tr || tr.readyState === 'ended') {
+      fixing = true; st.textContent = 'Mic paused, reconnecting…';
+      Audio.micStop(); Audio.mic.blocked = false; const ok = await Audio.micStart(); fixing = false;
+      if (!ok) { setOn(false); stopAll(); toast('The mic was switched off. Tap Start listening again.'); }
+    }
+  }
   const start = () => { TU.reset(); loop(() => {
-    const fr = Audio.micFrame(4096); if (!fr) return; const r = TU.read(fr.x, fr.sr, sel); if (!r.f0) return;
+    watchdog();
+    const fr = Audio.micFrame(4096); if (!fr) return; const r = TU.read(fr.x, fr.sr, sel);
+    lv.style.width = Math.min(100, Math.round(Math.sqrt(r.r || 0) * 400)) + '%';
+    const now = performance.now();
+    if (!r.f0) { if (now - lastHit > 900 && !fixing) { st.textContent = 'Listening… pluck one string'; $('#tuneWrap').classList.add('idle'); } return; }
+    lastHit = now; st.textContent = 'Hearing you'; $('#tuneWrap').classList.remove('idle');
     const { tgt, c } = showReading(DSP.f2m(r.f0));
     if (Math.abs(c) <= 5) { if (++streakOk === 14 && !good.has(tgt)) { good.add(tgt); drawStrings(); toast(`String ${6 - tgt} (${TUNINGS[tun].names[tgt]}) is in tune`); } } else streakOk = 0;
   }); };
