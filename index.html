@@ -591,6 +591,10 @@ const centsTxt = (c) => (c > 0 ? '+' : c < 0 ? '−' : '') + Math.abs(Math.round
 const GUIDES = [
   { title: 'Sparks', artist: 'Coldplay', url: 'https://claude.ai/artifact/ED9a5ZUuB9XQUjvhjxzzpg', tuning: 'flat', added: '2026-11-27',
     style: 'Full song · 8 sections', strum: 'D U D U – –', tempo: '84 BPM · 6/8', chords: ['022000','x64000','x75000','x87000','x42000','x32000','x30000','000000','354000','075000','577500','355400'] },
+  { title: "Nothing's New", artist: 'Rio Romeo', url: 'https://claude.ai/artifact/5EtNJh8Uu3vyrmF7Q9DnGd', tuning: 'std', capo: 4, added: '2026-11-27',
+    style: 'Full song · 8 sections', strum: 'D–U D–U D–U D–U', tempo: '62 BPM · 12/8', chords: ['G','Am','C','D'] },
+  { title: 'Babydoll', artist: 'Dominic Fike', url: 'https://claude.ai/artifact/J6Tmf4Qpi93axNLRhKM9sM', tuning: 'std', capo: 5, added: '2026-11-27',
+    style: 'Full song · 3 parts', strum: 'D – D U – U D U', tempo: '84 BPM · 4/4', chords: ['Am','E','Dm'] },
   { title: 'No Scrubs', artist: 'TLC', url: 'https://claude.ai/artifact/ME1hpqFZKGpTomFvGVjhgx', tuning: 'std', added: '2026-11-23',
     style: 'Fingerpicked + short solo', chords: ['Dm7','Am','E7'] }
 ];
@@ -602,10 +606,10 @@ function renderList() {
   const all = [...GUIDES, ...mine.map((m) => ({ ...m, own: 1 }))].filter((g) => !q || (g.title + ' ' + (g.artist || '')).toLowerCase().includes(q));
   $('#list').innerHTML = all.length ? all.map((g) => `<article class="song">
     <div class="top"><div><h3>${esc(g.title)}</h3><div class="who">${esc(g.artist || '')}</div></div>
-    <span class="badge ${g.tuning === 'flat' ? 'flat' : ''}">${g.tuning === 'flat' ? 'Half step down' : 'Standard tuning'}</span></div>
+    <span class="badge ${g.tuning === 'flat' ? 'flat' : ''}">${g.tuning === 'flat' ? 'Half step down' : 'Standard tuning'}${g.capo ? ' · Capo ' + g.capo : ''}</span></div>
     ${g.chords ? `<div class="chips">${g.chords.map((c) => `<span>${esc(c)}</span>`).join('')}</div>` : ''}
     ${g.style ? `<div class="facts"><span><b>${g.chords.length}</b> shapes</span><span>${esc(g.style)}</span>${g.tempo ? `<span><b>${esc(g.tempo)}</b></span>` : ''}</div>` : ''}
-    ${g.strum ? `<div class="strum"><span>Strum, every chord</span><b>${esc(g.strum)}</b></div>` : ''}
+    ${g.strum ? `<div class="strum"><span>Strum</span><b>${esc(g.strum)}</b></div>` : ''}
     <div class="row"><a class="btn" href="${esc(g.url)}" target="_blank" rel="noopener">Open guide</a>
     <button class="btn alt" data-tune="${g.tuning === 'flat' ? 'flat' : 'std'}">Tune for this song</button>
     ${g.own ? `<button class="btn ghost" data-del="${esc(g.url)}">Remove</button>` : ''}</div></article>`).join('')
